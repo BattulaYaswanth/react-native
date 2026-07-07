@@ -1,44 +1,51 @@
-import {Slot, useRouter, useSegments} from 'expo-router';
-import {useEffect} from 'react';
+import {Slot, useNavigationContainerRef, useRouter, useSegments} from 'expo-router';
+import {useEffect, useState} from 'react';
 import {ActivityIndicator, View} from 'react-native';
 import {useAuth, AuthProvider} from "@/components/auth";
 import "../global.css";
 import {DarkTheme, DefaultTheme, ThemeProvider} from "@react-navigation/native";
 import {useColorScheme} from "nativewind";
+import {verifySessionToken} from "@/lib/verifySessionToken";
 
 function InitialLayout() {
-    const { userToken, isLoading } = useAuth();
+    const { userToken, isLoading: authLoading, signOut } = useAuth();
     const segments = useSegments();
     const router = useRouter();
 
+    // Add a local state to trace network validation status
+    const rootNavigationRef = useNavigationContainerRef();
+    const [isNavigationReady, setIsNavigationReady] = useState(false);
+    const [isValidating, setIsValidating] = useState(true);
     useEffect(() => {
-        if (isLoading) return;
+        const unsubscribe = rootNavigationRef?.addListener('state', () => {
+            setIsNavigationReady(true);
+        });
 
-        // Check if user is currently inside the (auth) group
-        const inAuthGroup = segments[0] === '(auth)';
+        // Check if it's already ready on mount
+        if (rootNavigationRef?.isReady()) {
+            setIsNavigationReady(true);
+        }
 
-        // Defer navigation to the next macro-task tick
-        const timeout = setTimeout(() => {
-            if (!userToken && !inAuthGroup) {
-                // Redirect to the sign-in page if not authenticated
-                router.replace('/(auth)/login');
-            } else if (userToken && inAuthGroup) {
-                // Redirect to the main app if authenticated
-                router.replace('/(tabs)');
-            }
-        }, 0);
+        return unsubscribe;
+    }, [rootNavigationRef]);
+    useEffect(() => {
+        // Wait until your auth state hydration loader finishes reading from local disk
+        if (authLoading) return;
+        verifySessionToken({
+            userToken,
+            segments,
+            router,
+            setIsValidating,
+            signOut,
+            isNavigationReady
+        });
+    }, [userToken, authLoading, segments, router, signOut,isNavigationReady]);
 
-        // Clear timeout if the component unmounts before executing
-        return () => clearTimeout(timeout);
-
-        // Note: Removed 'router' from dependencies as it's a stable object
-        // and doesn't need to trigger this effect again.
-    }, [userToken, isLoading, segments, router]);
-
-    if (isLoading) {
+    // Keep the splash/loader running until both storage hydration AND endpoint handshake finish
+    if (authLoading || isValidating) {
         return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <ActivityIndicator size="large" />
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+                <ActivityIndicator size="large" color="#10B981" />
             </View>
         );
     }

@@ -9,6 +9,7 @@ import {
 import {useAuth} from "@/components/auth";
 import {SafeAreaView} from "react-native-safe-area-context";
 import {Image} from "expo-image";
+import {useUserStore} from "@/store/grocery-store";
 
 export default function LoginScreen() {
     const {signIn} = useAuth();
@@ -19,70 +20,51 @@ export default function LoginScreen() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
-
-    const API_URL = process.env.EXPO_BACKEND_API_URL || "http://10.0.2.2:8000/api";
+    const {createUser,loginUser} = useUserStore();
 
     const handleSubmit = async () => {
+        // 1. Client-Side Validations
         if (!email || !password) {
             return Alert.alert("Error", "Please fill all required fields");
         }
 
-        if (!isLogin) {
-            if (!name) {
-                return Alert.alert("Error", "Please enter your name");
-            }
-
-            if (password !== confirmPassword) {
-                return Alert.alert("Error", "Passwords do not match");
-            }
+        if (!isLogin && password !== confirmPassword) {
+            return Alert.alert("Error", "Passwords do not match");
         }
 
-        try {
-            const endpoint = isLogin ? "/login" : "/register";
+        // 2. Route payload processing into your Zustand Store handlers
+        if (isLogin) {
+            const loggedInUser = await loginUser(email, password);
 
-            const body = isLogin
-                ? {
-                    email,
-                    password,
-                }
-                : {
-                    name,
-                    email,
-                    password,
-                    password_confirmation: confirmPassword,
-                };
+            if (loggedInUser) {
+                // loggedInUser matches LoginUser type perfectly now
+                const { email, token } = loggedInUser;
 
-            const response = await fetch(`${API_URL}${endpoint}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(body),
+                await signIn(token);
+                Alert.alert("Success", `Welcome back, ${email}!`);
+            } else {
+                const currentError = useUserStore.getState().error;
+                Alert.alert("Login Failed", currentError || "Invalid Credentials");
+            }
+        }else {
+            const newUser = await createUser({
+                email,
+                password,
+                confirmPassword // Matches the backend expected naming convention parameter perfectly now
             });
 
-            const data = await response.json();
-
-            if (response.ok) {
-                if (isLogin) {
-                    await signIn(data.token);
-                } else {
-                    Alert.alert(
-                        "Success",
-                        "Registration successful. Please sign in."
-                    );
-
-                    setIsLogin(true);
-                    setPassword("");
-                    setConfirmPassword("");
-                }
-            } else {
+            if (newUser) {
                 Alert.alert(
-                    isLogin ? "Login Failed" : "Registration Failed",
-                    data.message || "Something went wrong"
+                    "Success",
+                    "Registration successful. Please sign in."
                 );
+                setIsLogin(true);
+                setPassword("");
+                setConfirmPassword("");
+            } else {
+                const currentError = useUserStore.getState().error;
+                Alert.alert("Registration Failed", currentError || "Something went wrong");
             }
-        } catch (err) {
-            Alert.alert("Network Error", "Unable to connect to the server.");
         }
     };
 
